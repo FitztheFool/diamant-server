@@ -1,3 +1,4 @@
+import 'dotenv/config';
 // diamant-server/src/index.ts
 import express from "express";
 import http from "http";
@@ -15,6 +16,25 @@ const io = new Server(server, {
         credentials: true,
     },
 });
+
+// ── Save attempts ─────────────────────────────────────────────────────────────
+
+async function saveAttempts(gameType: string, gameId: string, scores: { userId: string; score: number; placement?: number }[]) {
+    const frontendUrl = process.env.FRONTEND_URL;
+    const secret = process.env.INTERNAL_API_KEY;
+    if (!frontendUrl || !secret) return;
+    try {
+        const res = await fetch(`${frontendUrl}/api/attempts`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${secret}` },
+            body: JSON.stringify({ gameType, gameId, scores }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        console.log(`[${gameType}] scores saved for ${gameId}`);
+    } catch (err) {
+        console.error(`[${gameType}] saveAttempts error:`, err);
+    }
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -441,30 +461,11 @@ async function endGame(room: Room) {
     });
 
     // Sauvegarder en DB via l'API Next.js
-    try {
-        const res = await fetch(`${process.env.FRONTEND_URL}/api/attempts`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                gameType: "DIAMANT",
-                scores: scores.map((s) => ({
-                    userId: s.userId,
-                    score: s.score,
-                    metadata: {
-                        safeRubies: s.safeRubies,
-                        safeDiamonds: s.safeDiamonds,
-                        relicsOwned: s.relicsOwned,
-                        rank: scores.findIndex((x) => x.userId === s.userId) + 1,
-                        totalPlayers: scores.length,
-                    },
-                })),
-            }),
-        });
-        if (!res.ok) throw new Error(`API returned ${res.status}`);
-        console.log(`[DIAMANT] Scores saved for lobby ${room.lobbyId}`);
-    } catch (err) {
-        console.error("[DIAMANT] DB save error:", err);
-    }
+    await saveAttempts("DIAMANT", room.lobbyId, scores.map((s, i) => ({
+        userId: s.userId,
+        score: s.score,
+        placement: i + 1,
+    })));
 
     // Cleanup après 5 minutes
     setTimeout(() => rooms.delete(room.lobbyId), 5 * 60 * 1000);
