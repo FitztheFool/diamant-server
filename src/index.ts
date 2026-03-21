@@ -477,7 +477,7 @@ io.on("connection", (socket) => {
     console.log("diamant: new connection", socket.id);
 
     // ── Configure (from lobby-server) ─────────────────────────────────────────
-    socket.on("diamant:configure", ({ lobbyId, players, options }) => {
+    socket.on("diamant:configure", ({ lobbyId, players, options }, ack) => {
         if (!lobbyId || !players?.length) return;
 
         const room: Room = {
@@ -533,6 +533,7 @@ io.on("connection", (socket) => {
             room.phase = 'playing';
             setTimeout(() => startRound(room), 500);
         }
+        if (typeof ack === 'function') ack();
     });
 
     // ── Join ──────────────────────────────────────────────────────────────────
