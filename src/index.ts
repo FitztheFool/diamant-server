@@ -517,6 +517,22 @@ io.on("connection", (socket) => {
 
         rooms.set(lobbyId, room);
         console.log(`[DIAMANT] Room configured: ${lobbyId} (${players.length} players)`);
+
+        // Race condition: joueurs qui ont rejoint avant configure → leur donner l'état
+        for (const [, sock] of io.of('/').sockets) {
+            if (!sock.rooms.has(`room:${lobbyId}`)) continue;
+            const uid = sock.data?.userId;
+            if (!uid) continue;
+            const p = room.players.get(uid);
+            if (!p || p.socketId !== '') continue;
+            p.socketId = sock.id;
+            sock.emit('diamant:joined', { phase: room.phase, state: buildPublicState(room) });
+        }
+        const allConnected = Array.from(room.players.values()).every(p => p.socketId !== '');
+        if (allConnected && room.phase === 'waiting') {
+            room.phase = 'playing';
+            setTimeout(() => startRound(room), 500);
+        }
     });
 
     // ── Join ──────────────────────────────────────────────────────────────────
@@ -528,11 +544,8 @@ io.on("connection", (socket) => {
 
         let room = getRoom(lobbyId);
 
-        // Fallback si configure n'a pas été reçu (reconnexion directe)
-        if (!room) {
-            socket.emit("diamant:error", { message: "Room not found" });
-            return;
-        }
+        // Fallback si configure n'a pas encore été reçu : attendre sans erreur
+        if (!room) return;
 
         // Enregistrer / mettre à jour le socketId
         const player = room.players.get(userId);
