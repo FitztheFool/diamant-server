@@ -1,5 +1,5 @@
-import 'dotenv/config';
 // diamant-server/src/index.ts
+import 'dotenv/config';
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
@@ -484,7 +484,7 @@ io.on("connection", (socket) => {
             lobbyId,
             options: {
                 roundCount: options?.roundCount ?? 5,
-                decisionDuration: options?.decisionDuration ?? 15,
+                decisionDuration: options?.decisionDuration ?? 30,
             },
             players: new Map(
                 players.map((p: { userId: string; username: string }) => [
