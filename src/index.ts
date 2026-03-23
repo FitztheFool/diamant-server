@@ -545,8 +545,7 @@ io.on("connection", (socket) => {
 
         let room = getRoom(lobbyId);
 
-        // Fallback si configure n'a pas encore été reçu : attendre sans erreur
-        if (!room) return;
+        if (!room) { socket.emit('notFound'); return; }
 
         // Enregistrer / mettre à jour le socketId
         const player = room.players.get(userId);
@@ -558,13 +557,21 @@ io.on("connection", (socket) => {
             return;
         }
 
-        socket.emit("diamant:joined", {
-            phase: room.phase,
-            state: buildPublicState(room),
-            ...(room.decisionEndsAt && room.phase === "playing"
-                ? { decisionEndsAt: room.decisionEndsAt }
-                : {}),
-        });
+        // Reconnexion en cours de partie — renvoyer l'état courant
+        if (room.phase === "playing" || room.phase === "finished") {
+            socket.emit("diamant:joined", {
+                phase: room.phase,
+                state: buildPublicState(room),
+                ...(room.decisionEndsAt && room.phase === "playing"
+                    ? { decisionEndsAt: room.decisionEndsAt }
+                    : {}),
+            });
+        } else {
+            socket.emit("diamant:joined", {
+                phase: room.phase,
+                state: buildPublicState(room),
+            });
+        }
 
         // Démarrer si tous les joueurs sont connectés
         const allConnected = Array.from(room.players.values()).every((p) => p.socketId !== "");
