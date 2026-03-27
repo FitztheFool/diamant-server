@@ -19,7 +19,7 @@ const io = new Server(server, {
 
 // ── Save attempts ─────────────────────────────────────────────────────────────
 
-async function saveAttempts(gameType: string, gameId: string, scores: { userId: string; score: number; placement?: number }[]) {
+async function saveAttempts(gameType: string, gameId: string, scores: { userId: string; score: number; placement?: number; abandon?: boolean; afk?: boolean }[]) {
     const frontendUrl = process.env.FRONTEND_URL;
     const secret = process.env.INTERNAL_API_KEY;
     if (!frontendUrl || !secret) return;
@@ -89,6 +89,8 @@ interface Room {
     decisionEndsAt: number | null;
     // Scores finaux (pour save DB)
     finalScores: { userId: string; username: string; score: number }[];
+    // Joueur ayant abandonné (si surrender)
+    surrenderUserId?: string;
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -315,9 +317,9 @@ function startDecisionPhase(room: Room) {
 
     clearDecisionTimer(room);
     room.decisionTimer = setTimeout(() => {
-        // Les joueurs sans décision continuent par défaut
+        // Les joueurs sans décision rentrent au camp par défaut
         playersInCave(room).forEach((p) => {
-            if (p.decision === null) p.decision = "continue";
+            if (p.decision === null) p.decision = "leave";
         });
         resolveDecisions(room);
     }, room.options.decisionDuration * 1000);
@@ -455,7 +457,7 @@ async function endGame(room: Room) {
     scores.sort((a, b) => b.score - a.score);
     room.finalScores = scores;
 
-    emitToRoom(room, "diamant:gameOver", {
+    emitToRoom(room, "diamant:finished", {
         scores,
         winnerId: scores[0]?.userId ?? null,
     });
@@ -465,6 +467,7 @@ async function endGame(room: Room) {
         userId: s.userId,
         score: s.score,
         placement: i + 1,
+        abandon: room.surrenderUserId === s.userId,
     })));
 
     // Cleanup après 5 minutes
@@ -608,6 +611,16 @@ io.on("connection", (socket) => {
         }
     });
 
+    // ── Surrender ─────────────────────────────────────────────────────────────
+    socket.on("diamant:surrender", () => {
+        const { lobbyId, userId } = socket.data || {};
+        if (!lobbyId) return;
+        const room = getRoom(lobbyId);
+        if (!room || room.phase === "finished") return;
+        room.surrenderUserId = userId;
+        endGame(room);
+    });
+
     // ── Disconnect ────────────────────────────────────────────────────────────
     socket.on("disconnect", () => {
         const { lobbyId, userId } = socket.data || {};
@@ -618,11 +631,11 @@ io.on("connection", (socket) => {
 
         console.log(`diamant: player ${userId} disconnected from ${lobbyId}`);
 
-        // En jeu : voter "continue" automatiquement pour ne pas bloquer les autres
+        // En jeu : voter "leave" automatiquement pour ne pas bloquer les autres
         if (room.phase === "playing") {
             const player = room.players.get(userId);
             if (player && player.inCave && player.decision === null) {
-                player.decision = "continue";
+                player.decision = "leave";
                 const inCave = playersInCave(room);
                 const allVoted = inCave.every((p) => p.decision !== null);
                 if (allVoted) resolveDecisions(room);
