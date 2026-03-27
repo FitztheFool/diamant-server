@@ -100,7 +100,6 @@ const rooms = new Map<string, Room>();
 // ── Card helpers ──────────────────────────────────────────────────────────────
 
 const DANGER_TYPES = ["spider", "snake", "lava", "boulder", "ram"] as const;
-const TREASURE_VALUES = [1, 2, 3, 4, 5, 7, 9, 11, 14, 15, 17];
 
 function buildDeck(): Card[] {
     const cards: Card[] = [];
@@ -364,8 +363,8 @@ function resolveDecisions(room: Room) {
         const loner = leaving[0];
         room.relicsInCave.forEach(() => {
             const relicNumber = room.relicsExited + relicsCollected + 1;
-            // Les 3 premières valent 1 diamant (5 rubis), les suivantes 2 diamants
-            const diamonds = relicNumber <= 3 ? 1 : 2;
+            // Les 3 premières valent 2 diamants, les suivantes 4 diamants
+            const diamonds = relicNumber <= 3 ? 2 : 4;
             loner.safeDiamonds += diamonds;
             loner.relicsOwned += 1;
             relicsCollected++;
