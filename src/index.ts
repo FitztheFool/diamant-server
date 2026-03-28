@@ -63,6 +63,8 @@ interface Player {
     inCave: boolean;
     // Décision ce tour : "continue" | "leave" | null
     decision: "continue" | "leave" | null;
+    // A abandonné la partie en cours
+    surrendered: boolean;
 }
 
 interface Room {
@@ -87,6 +89,8 @@ interface Room {
     // Timer décision
     decisionTimer: ReturnType<typeof setTimeout> | null;
     decisionEndsAt: number | null;
+    // Timer de transition de phase (revealNextCard, endRound, startRound…)
+    phaseTimer: ReturnType<typeof setTimeout> | null;
     // Scores finaux (pour save DB)
     finalScores: { userId: string; username: string; score: number }[];
     // Joueur ayant abandonné (si surrender)
@@ -170,6 +174,7 @@ function buildPublicState(room: Room) {
             safeDiamonds: p.safeDiamonds,
             relicsOwned: p.relicsOwned,
             inCave: p.inCave,
+            surrendered: p.surrendered,
             // Ne pas révéler la décision avant la résolution
             hasDecided: p.decision !== null,
         })),
@@ -185,6 +190,13 @@ function clearDecisionTimer(room: Room) {
     }
 }
 
+function clearPhaseTimer(room: Room) {
+    if (room.phaseTimer) {
+        clearTimeout(room.phaseTimer);
+        room.phaseTimer = null;
+    }
+}
+
 function startRound(room: Room) {
     // Réinitialiser l'état de manche
     room.deck = buildDeck();
@@ -193,8 +205,9 @@ function startRound(room: Room) {
     room.rubisonCards = new Map();
     room.relicsInCave = [];
 
-    // Tous les joueurs rentrent dans la grotte
+    // Tous les joueurs actifs rentrent dans la grotte
     room.players.forEach((p) => {
+        if (p.surrendered) return;
         p.inCave = true;
         p.handRubies = 0;
         p.decision = null;
@@ -207,7 +220,8 @@ function startRound(room: Room) {
     });
 
     // Petite pause avant de révéler la première carte
-    setTimeout(() => revealNextCard(room), 1500);
+    clearPhaseTimer(room);
+    room.phaseTimer = setTimeout(() => revealNextCard(room), 1500);
 }
 
 function playersInCave(room: Room): Player[] {
@@ -215,6 +229,7 @@ function playersInCave(room: Room): Player[] {
 }
 
 function revealNextCard(room: Room) {
+    clearPhaseTimer(room);
     const inCave = playersInCave(room);
     if (inCave.length === 0) {
         endRound(room, "all_left");
@@ -274,7 +289,8 @@ function revealNextCard(room: Room) {
                 state: buildPublicState(room),
             });
 
-            setTimeout(() => endRound(room, "double_danger"), 2000);
+            clearPhaseTimer(room);
+            room.phaseTimer = setTimeout(() => endRound(room, "double_danger"), 2000);
 
         } else {
             room.seenDangers.add(danger);
@@ -336,7 +352,8 @@ function resolveDecisions(room: Room) {
             decisions: buildDecisionsPayload(room),
             state: buildPublicState(room),
         });
-        setTimeout(() => revealNextCard(room), 1500);
+        clearPhaseTimer(room);
+        room.phaseTimer = setTimeout(() => revealNextCard(room), 1500);
         return;
     }
 
@@ -398,12 +415,14 @@ function resolveDecisions(room: Room) {
 
     // Si plus personne dans la grotte → fin de manche
     if (playersInCave(room).length === 0) {
-        setTimeout(() => endRound(room, "all_left"), 1500);
+        clearPhaseTimer(room);
+        room.phaseTimer = setTimeout(() => endRound(room, "all_left"), 1500);
         return;
     }
 
     // Sinon continuer
-    setTimeout(() => revealNextCard(room), 2000);
+    clearPhaseTimer(room);
+    room.phaseTimer = setTimeout(() => revealNextCard(room), 2000);
 }
 
 function buildDecisionsPayload(room: Room) {
@@ -415,6 +434,7 @@ function buildDecisionsPayload(room: Room) {
 
 async function endRound(room: Room, reason: "double_danger" | "all_left" | "deck_empty") {
     clearDecisionTimer(room);
+    clearPhaseTimer(room);
 
     // Les joueurs encore dans la grotte perdent leurs rubis en main
     playersInCave(room).forEach((p) => {
@@ -433,14 +453,15 @@ async function endRound(room: Room, reason: "double_danger" | "all_left" | "deck
 
     if (room.round >= room.options.roundCount) {
         // Fin de partie
-        setTimeout(() => endGame(room), 2000);
+        room.phaseTimer = setTimeout(() => endGame(room), 2000);
     } else {
         room.round++;
-        setTimeout(() => startRound(room), 3000);
+        room.phaseTimer = setTimeout(() => startRound(room), 3000);
     }
 }
 
 async function endGame(room: Room) {
+    clearDecisionTimer(room);
     room.phase = "finished";
 
     // Calculer les scores finaux (rubis + diamants × 5)
@@ -466,7 +487,7 @@ async function endGame(room: Room) {
         userId: s.userId,
         score: s.score,
         placement: i + 1,
-        abandon: room.surrenderUserId === s.userId,
+        abandon: room.surrenderUserId === s.userId || (room.players.get(s.userId)?.surrendered ?? false),
     })));
 
     // Cleanup après 5 minutes
@@ -501,6 +522,7 @@ io.on("connection", (socket) => {
                         relicsOwned: 0,
                         inCave: false,
                         decision: null,
+                        surrendered: false,
                     },
                 ])
             ),
@@ -514,6 +536,7 @@ io.on("connection", (socket) => {
             relicsExited: 0,
             decisionTimer: null,
             decisionEndsAt: null,
+            phaseTimer: null,
             finalScores: [],
         };
 
@@ -616,8 +639,33 @@ io.on("connection", (socket) => {
         if (!lobbyId) return;
         const room = getRoom(lobbyId);
         if (!room || room.phase === "finished") return;
-        room.surrenderUserId = userId;
-        endGame(room);
+
+        const player = room.players.get(userId);
+        if (!player || player.surrendered) return;
+
+        const activePlayers = Array.from(room.players.values()).filter((p) => !p.surrendered);
+        if (activePlayers.length > 2) {
+            // Assez de joueurs pour continuer
+            player.surrendered = true;
+            if (player.inCave && player.decision === null) {
+                player.decision = "leave";
+            }
+            player.inCave = false;
+            emitToRoom(room, "diamant:playerSurrendered", { userId });
+            const inCave = playersInCave(room);
+            if (inCave.length === 0) {
+                clearPhaseTimer(room);
+                room.phaseTimer = setTimeout(() => endRound(room, "all_left"), 1500);
+            } else if (inCave.every((p) => p.decision !== null)) {
+                resolveDecisions(room);
+            }
+        } else {
+            player.surrendered = true;
+            player.inCave = false;
+            emitToRoom(room, "diamant:playerSurrendered", { userId });
+            room.surrenderUserId = userId;
+            endGame(room);
+        }
     });
 
     // ── Disconnect ────────────────────────────────────────────────────────────
@@ -633,7 +681,7 @@ io.on("connection", (socket) => {
         // En jeu : voter "leave" automatiquement pour ne pas bloquer les autres
         if (room.phase === "playing") {
             const player = room.players.get(userId);
-            if (player && player.inCave && player.decision === null) {
+            if (player && !player.surrendered && player.inCave && player.decision === null) {
                 player.decision = "leave";
                 const inCave = playersInCave(room);
                 const allVoted = inCave.every((p) => p.decision !== null);
