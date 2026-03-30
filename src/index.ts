@@ -1,5 +1,6 @@
 // diamant-server/src/index.ts
 import 'dotenv/config';
+import { randomUUID } from 'crypto';
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
@@ -51,19 +52,12 @@ interface Player {
     userId: string;
     username: string;
     socketId: string;
-    // Rubis en main (dans la grotte, pas encore en sécurité)
     handRubies: number;
-    // Rubis dans le coffre (en sécurité)
     safeRubies: number;
-    // Diamants dans le coffre (valeur 5 chacun)
-    safeDiamonds: number;
-    // Reliques récupérées (hors grotte)
+    relicPoints: number;
     relicsOwned: number;
-    // Dans la grotte ce tour ?
     inCave: boolean;
-    // Décision ce tour : "continue" | "leave" | null
     decision: "continue" | "leave" | null;
-    // A abandonné la partie en cours
     surrendered: boolean;
 }
 
@@ -83,7 +77,7 @@ interface Room {
     // Rubis posés sur chaque carte trésor (index dans revealedCards)
     rubisonCards: Map<number, number>;
     // Reliques dans la grotte (index dans revealedCards)
-    relicsInCave: number[];
+    relicsInCave: string[];
     // Nombre total de reliques sorties de la grotte (pour calculer leur valeur)
     relicsExited: number;
     // Timer décision
@@ -95,6 +89,7 @@ interface Room {
     finalScores: { userId: string; username: string; score: number }[];
     // Joueur ayant abandonné (si surrender)
     surrenderUserId?: string;
+    currentGameId?: string;
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -171,7 +166,7 @@ function buildPublicState(room: Room) {
             username: p.username,
             handRubies: p.handRubies,
             safeRubies: p.safeRubies,
-            safeDiamonds: p.safeDiamonds,
+            relicPoints: p.relicPoints,
             relicsOwned: p.relicsOwned,
             inCave: p.inCave,
             surrendered: p.surrendered,
@@ -305,7 +300,7 @@ function revealNextCard(room: Room) {
         }
 
     } else if (card.type === "relic") {
-        room.relicsInCave.push(cardIndex);
+        room.relicsInCave.push(card.id);
 
         emitToRoom(room, "diamant:cardRevealed", {
             card,
@@ -318,6 +313,12 @@ function revealNextCard(room: Room) {
 }
 
 function startDecisionPhase(room: Room) {
+    // Guard : si plus personne en grotte, terminer la manche directement
+    if (playersInCave(room).length === 0) {
+        endRound(room, "all_left");
+        return;
+    }
+
     // Remettre les décisions à null
     playersInCave(room).forEach((p) => { p.decision = null; });
 
@@ -371,32 +372,32 @@ function resolveDecisions(room: Room) {
     // On remet le reste sur une carte quelconque
     room.rubisonCards.clear();
     if (leftoverRubis > 0 && room.revealedCards.length > 0) {
-        room.rubisonCards.set(room.revealedCards.length - 1, leftoverRubis);
+        const lastTreasureIndex = [...room.revealedCards]
+            .map((c, i) => ({ c, i }))
+            .filter(({ c }) => c.type === 'treasure')
+            .at(-1)?.i ?? room.revealedCards.length - 1;
+        room.rubisonCards.set(lastTreasureIndex, leftoverRubis);
     }
 
     // Reliques — seulement si UN SEUL joueur sort
     let relicsCollected = 0;
     if (leaving.length === 1) {
         const loner = leaving[0];
-        room.relicsInCave.forEach(() => {
-            const relicNumber = room.relicsExited + relicsCollected + 1;
-            // Les 3 premières valent 2 diamants, les suivantes 4 diamants
-            const diamonds = relicNumber <= 3 ? 2 : 4;
-            loner.safeDiamonds += diamonds;
+        const relicCount = room.relicsInCave.length;
+
+        for (let i = 0; i < relicCount; i++) {
+            const relicNumber = room.relicsExited + i + 1;
+            const points = relicNumber <= 3 ? 10 : 20;
+            loner.relicPoints += points;
             loner.relicsOwned += 1;
-            relicsCollected++;
-        });
-        room.relicsExited += relicsCollected;
+        }
+
+        room.relicsExited += relicCount;
         room.relicsInCave = [];
     }
 
-    // Sécuriser les rubis des partants
     leaving.forEach((p) => {
-        // Convertir 5 rubis en 1 diamant automatiquement
-        const diamonds = Math.floor(p.handRubies / 5);
-        const remainingRubies = p.handRubies % 5;
-        p.safeDiamonds += diamonds;
-        p.safeRubies += remainingRubies;
+        p.safeRubies += p.handRubies;
         p.handRubies = 0;
         p.inCave = false;
         p.decision = null;
@@ -443,6 +444,7 @@ async function endRound(room: Room, reason: "double_danger" | "all_left" | "deck
     });
 
     // Reliques restantes dans la grotte sont retirées du jeu
+    room.relicsExited += room.relicsInCave.length;
     room.relicsInCave = [];
 
     emitToRoom(room, "diamant:roundEnd", {
@@ -464,13 +466,13 @@ async function endGame(room: Room) {
     clearDecisionTimer(room);
     room.phase = "finished";
 
-    // Calculer les scores finaux (rubis + diamants × 5)
+    // Calculer les scores finaux
     const scores = Array.from(room.players.values()).map((p) => ({
         userId: p.userId,
         username: p.username,
-        score: p.safeRubies + p.safeDiamonds * 5,
+        score: p.safeRubies + p.relicPoints,
         safeRubies: p.safeRubies,
-        safeDiamonds: p.safeDiamonds,
+        relicPoints: p.relicPoints,
         relicsOwned: p.relicsOwned,
     }));
 
@@ -483,7 +485,7 @@ async function endGame(room: Room) {
     });
 
     // Sauvegarder en DB via l'API Next.js
-    await saveAttempts("DIAMANT", room.lobbyId, scores.map((s, i) => ({
+    await saveAttempts("DIAMANT", room.currentGameId ?? room.lobbyId, scores.map((s, i) => ({
         userId: s.userId,
         score: s.score,
         placement: i + 1,
@@ -518,7 +520,7 @@ io.on("connection", (socket) => {
                         socketId: "",
                         handRubies: 0,
                         safeRubies: 0,
-                        safeDiamonds: 0,
+                        relicPoints: 0,
                         relicsOwned: 0,
                         inCave: false,
                         decision: null,
@@ -528,6 +530,7 @@ io.on("connection", (socket) => {
             ),
             phase: "waiting",
             round: 1,
+            currentGameId: randomUUID(),
             revealedCards: [],
             deck: [],
             seenDangers: new Set(),
