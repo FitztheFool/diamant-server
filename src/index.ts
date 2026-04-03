@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
+import { jwtVerify } from 'jose';
 
 const app = express();
 app.get("/health", (req, res) => res.status(200).send("ok"));
@@ -498,6 +499,21 @@ async function endGame(room: Room) {
 
 // ── Socket handlers ───────────────────────────────────────────────────────────
 
+const SOCKET_SECRET = new TextEncoder().encode(process.env.INTERNAL_API_KEY!);
+
+io.use(async (socket, next) => {
+    const token = socket.handshake.auth?.token as string | undefined;
+    if (!token) return next(new Error('auth_required'));
+    try {
+        const { payload } = await jwtVerify(token, SOCKET_SECRET);
+        socket.data.userId = payload.sub as string;
+        socket.data.username = payload.username as string;
+        next();
+    } catch {
+        next(new Error('invalid_token'));
+    }
+});
+
 io.on("connection", (socket) => {
     console.log("diamant: new connection", socket.id);
 
@@ -565,10 +581,11 @@ io.on("connection", (socket) => {
     });
 
     // ── Join ──────────────────────────────────────────────────────────────────
-    socket.on("diamant:join", ({ lobbyId, userId, username }) => {
+    socket.on("diamant:join", ({ lobbyId }) => {
+        const { userId } = socket.data;
         if (!lobbyId || !userId) return;
 
-        socket.data = { lobbyId, userId };
+        socket.data.lobbyId = lobbyId;
         socket.join(`room:${lobbyId}`);
 
         let room = getRoom(lobbyId);
