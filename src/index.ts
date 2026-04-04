@@ -7,7 +7,7 @@ import { Server } from "socket.io";
 import { jwtVerify } from 'jose';
 
 const app = express();
-app.get("/health", (req, res) => res.status(200).send("ok"));
+app.get("/health", (_req, res) => res.status(200).send("ok"));
 
 const server = http.createServer(app);
 
@@ -99,13 +99,13 @@ const rooms = new Map<string, Room>();
 
 // ── Card helpers ──────────────────────────────────────────────────────────────
 
-const DANGER_TYPES = ["spider", "snake", "lava", "boulder", "ram"] as const;
+const DANGER_TYPES = ["spider", "fireball", "mummy", "landslide", "snake"] as const;
 
 function buildDeck(): Card[] {
     const cards: Card[] = [];
 
     // 15 cartes Trésor
-    const treasureValues = [1, 2, 3, 4, 5, 5, 7, 7, 9, 11, 11, 14, 15, 17, 17];
+    const treasureValues = [1, 2, 3, 4, 5, 5, 7, 7, 9, 11, 11, 13, 14, 15, 17];
     treasureValues.forEach((v, i) => {
         cards.push({ id: `treasure-${i}`, type: "treasure", value: v });
     });
@@ -147,12 +147,6 @@ function emitToRoom(room: Room, event: string, payload: unknown) {
     });
 }
 
-function emitToPlayer(room: Room, userId: string, event: string, payload: unknown) {
-    const player = room.players.get(userId);
-    if (!player) return;
-    const s = io.sockets.sockets.get(player.socketId);
-    if (s) s.emit(event, payload);
-}
 
 function buildPublicState(room: Room) {
     return {
@@ -346,7 +340,6 @@ function resolveDecisions(room: Room) {
     clearDecisionTimer(room);
 
     const leaving = playersInCave(room).filter((p) => p.decision === "leave");
-    const staying = playersInCave(room).filter((p) => p.decision === "continue");
 
     if (leaving.length === 0) {
         // Tout le monde continue
