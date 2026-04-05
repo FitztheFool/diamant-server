@@ -21,15 +21,20 @@ const io = new Server(server, {
 
 // ── Save attempts ─────────────────────────────────────────────────────────────
 
-async function saveAttempts(gameType: string, gameId: string, scores: { userId: string; score: number; placement?: number; abandon?: boolean; afk?: boolean }[]) {
+async function saveAttempts(gameType: string, gameId: string, scores: { userId: string; username?: string; score: number; placement?: number; abandon?: boolean; afk?: boolean }[], vsBot = false) {
     const frontendUrl = process.env.FRONTEND_URL;
     const secret = process.env.INTERNAL_API_KEY;
     if (!frontendUrl || !secret) return;
+    const humanScores = scores.filter(s => !s.userId.startsWith('bot-'));
+    if (humanScores.length === 0) return;
+    const bots = scores
+        .filter(s => s.userId.startsWith('bot-'))
+        .map((s, i) => ({ username: s.username ?? `Bot ${i + 1}`, score: s.score, placement: s.placement ?? i + 1 }));
     try {
         const res = await fetch(`${frontendUrl}/api/attempts`, {
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${secret}` },
-            body: JSON.stringify({ gameType, gameId, scores }),
+            body: JSON.stringify({ gameType, gameId, vsBot, bots: bots.length > 0 ? bots : undefined, scores: humanScores }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         console.log(`[${gameType}] scores saved for ${gameId}`);
@@ -60,6 +65,7 @@ interface Player {
     inCave: boolean;
     decision: "continue" | "leave" | null;
     surrendered: boolean;
+    riskTolerance?: number; // bots uniquement : 0.2 (timide) → 0.8 (audacieux)
 }
 
 interface Room {
@@ -307,6 +313,61 @@ function revealNextCard(room: Room) {
     }
 }
 
+// ── Bot logic ─────────────────────────────────────────────────────────────────
+
+// Personnalités assignées en rotation aux bots (timide → normal → audacieux)
+const BOT_TOLERANCES = [0.25, 0.52, 0.78];
+
+function botDecide(room: Room, bot: Player): 'continue' | 'leave' {
+    // Légère variation aléatoire pour éviter que deux bots de même profil jouent à l'identique
+    const base = bot.riskTolerance ?? 0.5;
+    const tolerance = Math.max(0.1, Math.min(0.9, base + (Math.random() - 0.5) * 0.08));
+
+    const inCave = playersInCave(room);
+    const deckSize = room.deck.length;
+
+    const doubleDangerCards = room.seenDangers.size * 2;
+    const pDoubleDanger = deckSize > 0 ? doubleDangerCards / deckSize : 1;
+
+    const handRubies = bot.handRubies;
+    const alone = inCave.length === 1;
+    const hasRelics = room.relicsInCave.length > 0;
+
+    // Seul avec des reliques et risque acceptable → rester pour les ramasser
+    if (alone && hasRelics && pDoubleDanger < tolerance * 0.45) return 'continue';
+
+    // Risque dépasse le seuil de tolérance → sortir
+    if (pDoubleDanger > tolerance) return 'leave';
+
+    // Seuil d'encaissement selon l'audace :
+    // timide (0.25) → sort dès ~7 rubis ; audacieux (0.78) → attend ~14 rubis
+    const rubyThreshold = Math.round(3 + tolerance * 14);
+    if (handRubies >= rubyThreshold && pDoubleDanger > tolerance * 0.4) return 'leave';
+    if (handRubies >= Math.max(3, Math.round(rubyThreshold * 0.55)) && pDoubleDanger > tolerance * 0.65) return 'leave';
+
+    // Cave profonde : même les audacieux deviennent prudents
+    if (room.revealedCards.length >= 8 && pDoubleDanger > tolerance * 0.35) return 'leave';
+
+    return 'continue';
+}
+
+function scheduleBotDecisions(room: Room): void {
+    const bots = playersInCave(room).filter(p => p.userId.startsWith('bot-'));
+    for (const bot of bots) {
+        const delay = 1000 + Math.random() * 2000;
+        setTimeout(() => {
+            if (bot.decision !== null || room.phase !== 'playing') return;
+            bot.decision = botDecide(room, bot);
+            emitToRoom(room, 'diamant:playerDecided', {
+                userId: bot.userId,
+                state: buildPublicState(room),
+            });
+            const allVoted = playersInCave(room).every(p => p.decision !== null);
+            if (allVoted) resolveDecisions(room);
+        }, delay);
+    }
+}
+
 function startDecisionPhase(room: Room) {
     // Guard : si plus personne en grotte, terminer la manche directement
     if (playersInCave(room).length === 0) {
@@ -334,6 +395,8 @@ function startDecisionPhase(room: Room) {
         });
         resolveDecisions(room);
     }, room.options.decisionDuration * 1000);
+
+    scheduleBotDecisions(room);
 }
 
 function resolveDecisions(room: Room) {
@@ -479,12 +542,14 @@ async function endGame(room: Room) {
     });
 
     // Sauvegarder en DB via l'API Next.js
+    const vsBot = Array.from(room.players.keys()).some(id => id.startsWith('bot-'));
     await saveAttempts("DIAMANT", room.currentGameId ?? room.lobbyId, scores.map((s, i) => ({
         userId: s.userId,
+        username: s.username,
         score: s.score,
         placement: i + 1,
         abandon: room.surrenderUserId === s.userId || (room.players.get(s.userId)?.surrendered ?? false),
-    })));
+    })), vsBot);
 
     // Cleanup après 5 minutes
     setTimeout(() => rooms.delete(room.lobbyId), 5 * 60 * 1000);
@@ -514,6 +579,7 @@ io.on("connection", (socket) => {
     socket.on("diamant:configure", ({ lobbyId, players, options }, ack) => {
         if (!lobbyId || !players?.length) return;
 
+        let botIdx = 0;
         const room: Room = {
             lobbyId,
             options: {
@@ -521,9 +587,10 @@ io.on("connection", (socket) => {
                 decisionDuration: options?.decisionDuration ?? 30,
             },
             players: new Map(
-                players.map((p: { userId: string; username: string }) => [
-                    p.userId,
-                    {
+                players.map((p: { userId: string; username: string }) => {
+                    const isBot = p.userId.startsWith('bot-');
+                    const riskTolerance = isBot ? BOT_TOLERANCES[botIdx++ % BOT_TOLERANCES.length] : undefined;
+                    return [p.userId, {
                         userId: p.userId,
                         username: p.username,
                         socketId: "",
@@ -531,11 +598,12 @@ io.on("connection", (socket) => {
                         safeRubies: 0,
                         relicPoints: 0,
                         relicsOwned: 0,
+                        riskTolerance,
                         inCave: false,
                         decision: null,
                         surrendered: false,
-                    },
-                ])
+                    }];
+                })
             ),
             phase: "waiting",
             round: 1,
@@ -565,7 +633,7 @@ io.on("connection", (socket) => {
             p.socketId = sock.id;
             sock.emit('diamant:joined', { phase: room.phase, state: buildPublicState(room) });
         }
-        const allConnected = Array.from(room.players.values()).every(p => p.socketId !== '');
+        const allConnected = Array.from(room.players.values()).every(p => p.socketId !== '' || p.userId.startsWith('bot-'));
         if (allConnected && room.phase === 'waiting') {
             room.phase = 'playing';
             setTimeout(() => startRound(room), 500);
@@ -611,8 +679,8 @@ io.on("connection", (socket) => {
             });
         }
 
-        // Démarrer si tous les joueurs sont connectés
-        const allConnected = Array.from(room.players.values()).every((p) => p.socketId !== "");
+        // Démarrer si tous les humains sont connectés (bots n'ont pas de socket)
+        const allConnected = Array.from(room.players.values()).every((p) => p.socketId !== "" || p.userId.startsWith('bot-'));
         if (allConnected && room.phase === "waiting") {
             room.phase = "playing";
             setTimeout(() => startRound(room), 500);
