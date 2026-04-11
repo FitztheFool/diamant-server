@@ -2,6 +2,7 @@
 
 import type { Server } from "socket.io";
 import type { Card, Player, Room } from "./types";
+import { shuffle } from "@kwizar/shared";
 
 // ── IO singleton ──────────────────────────────────────────────────────────────
 
@@ -56,14 +57,6 @@ export function clearPhaseTimer(room: Room) {
 
 const DANGER_TYPES = ["spider", "fireball", "mummy", "landslide", "snake"] as const;
 
-function shuffle<T>(arr: T[]): T[] {
-    const a = [...arr];
-    for (let i = a.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
-}
 
 export function buildDeck(): Card[] {
     const cards: Card[] = [];
