@@ -1,10 +1,10 @@
-export type DangerType = "spider" | "fireball" | "mummy" | "landslide" | "snake";
+export type CardType = "treasure" | "danger" | "relic";
 
 export interface Card {
     id: string;
-    type: "treasure" | "danger" | "relic";
+    type: CardType;
     value?: number;
-    danger?: DangerType;
+    danger?: string;
 }
 
 export interface Player {
@@ -27,10 +27,9 @@ export interface Room {
     players: Map<string, Player>;
     phase: "waiting" | "playing" | "finished";
     round: number;
-    currentGameId: string | null;
     revealedCards: Card[];
     deck: Card[];
-    seenDangers: Set<DangerType>;
+    seenDangers: Set<string>;
     rubisonCards: Map<number, number>;
     relicsInCave: string[];
     relicsExited: number;
@@ -39,4 +38,5 @@ export interface Room {
     phaseTimer: ReturnType<typeof setTimeout> | null;
     finalScores: { userId: string; username: string; score: number }[];
     surrenderUserId?: string;
+    currentGameId?: string;
 }
