@@ -6,6 +6,8 @@ import express from "express";
 import http from "http";
 import { Server } from "socket.io";
 import { setupSocketAuth, corsConfig } from "@kwizar/shared";
+import { io as socketClient } from "socket.io-client";
+import { SignJWT } from "jose";
 import { BOT_TOLERANCES, buildPublicState, emitToRoom, getRoom, playersInCave, setIo, setRoom, clearPhaseTimer } from "./room";
 import { endGame, endRound, resolveDecisions, startDecisionPhase, startRound } from "./game";
 import type { Room } from "./types";
@@ -23,13 +25,28 @@ setIo(io);
 
 setupSocketAuth(io, new TextEncoder().encode(process.env.INTERNAL_API_KEY!));
 
-// ── Socket handlers ────────────────────────────────────────────────────────────
+// ── Lobby server connection ────────────────────────────────────────────────────
 
-io.on("connection", (socket) => {
-    console.log("diamant: new connection", socket.id);
+const LOBBY_URL = process.env.LOBBY_SERVER_URL || "http://localhost:10000";
 
-    // ── Configure (from lobby-server) ─────────────────────────────────────────
-    socket.on("diamant:configure", ({ lobbyId, players, options }, ack) => {
+async function makeLobbyToken(): Promise<string> {
+    return new SignJWT({ username: "diamant-server" })
+        .setProtectedHeader({ alg: "HS256" })
+        .setSubject("diamant-server")
+        .sign(new TextEncoder().encode(process.env.INTERNAL_API_KEY!));
+}
+
+const lobbySocket = socketClient(LOBBY_URL, {
+    auth: (cb: (d: object) => void) => makeLobbyToken().then(token => cb({ token, gameType: "diamant" })),
+    reconnection: true,
+    reconnectionDelay: 5_000,
+    reconnectionDelayMax: 30_000,
+});
+lobbySocket.on("connect", () => console.log("[LOBBY] connected"));
+lobbySocket.on("disconnect", (reason: string) => console.log("[LOBBY] disconnected:", reason));
+lobbySocket.on("connect_error", (err: any) => console.log("[LOBBY] connect_error:", err.message));
+
+lobbySocket.on("diamant:configure", ({ lobbyId, players, options }: any, ack?: () => void) => {
         if (!lobbyId || !players?.length) return;
 
         let botIdx = 0;
@@ -75,7 +92,12 @@ io.on("connection", (socket) => {
             setTimeout(() => startRound(room), 500);
         }
         if (typeof ack === "function") ack();
-    });
+});
+
+// ── Socket handlers ────────────────────────────────────────────────────────────
+
+io.on("connection", (socket) => {
+    console.log("diamant: new connection", socket.id);
 
     // ── Join ──────────────────────────────────────────────────────────────────
     socket.on("diamant:join", ({ lobbyId }) => {
