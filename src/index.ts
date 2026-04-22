@@ -161,7 +161,10 @@ io.on("connection", (socket) => {
         player.inCave = false;
         emitToRoom(room, "diamant:playerSurrendered", { userId });
 
-        if (active.length > 2) {
+        const remainingActive = active.filter((p) => p.userId !== userId);
+        const onlyBotsLeft = remainingActive.length > 0 && remainingActive.every((p) => p.userId.startsWith("bot-"));
+
+        if (active.length > 2 && !onlyBotsLeft) {
             if (player.decision === null) player.decision = "leave";
             const inCave = playersInCave(room);
             if (inCave.length === 0) {
