@@ -39,4 +39,5 @@ export interface Room {
     finalScores: { userId: string; username: string; score: number }[];
     surrenderUserId?: string;
     currentGameId?: string;
+    disconnectTimers: Map<string, ReturnType<typeof setTimeout>>;
 }

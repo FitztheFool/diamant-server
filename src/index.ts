@@ -47,6 +47,7 @@ lobbySocket.on("diamant:configure", ({ lobbyId, players, options }: any, ack?: (
             revealedCards: [], deck: [], seenDangers: new Set(),
             rubisonCards: new Map(), relicsInCave: [], relicsExited: 0,
             decisionTimer: null, decisionEndsAt: null, phaseTimer: null, finalScores: [],
+            disconnectTimers: new Map(),
         };
 
         setRoom(lobbyId, room);
@@ -93,6 +94,13 @@ io.on("connection", (socket) => {
         if (!player) { socket.emit("diamant:error", { message: "Player not in this game" }); return; }
 
         player.socketId = socket.id;
+
+        const disconnectTimer = room.disconnectTimers.get(userId);
+        if (disconnectTimer) {
+            clearTimeout(disconnectTimer);
+            room.disconnectTimers.delete(userId);
+            emitToRoom(room, "diamant:playerReconnected", { userId, username: player.username });
+        }
 
         socket.emit("diamant:joined", {
             phase: room.phase,
@@ -166,10 +174,24 @@ io.on("connection", (socket) => {
         if (!room || room.phase !== "playing") return;
 
         const player = room.players.get(userId);
-        if (player && !player.surrendered && player.inCave && player.decision === null) {
-            player.decision = "leave";
-            if (playersInCave(room).every((p) => p.decision !== null)) resolveDecisions(room);
-        }
+        if (!player || player.surrendered) return;
+
+        player.socketId = "";
+        emitToRoom(room, "diamant:inactivityWarning", { userId, username: player.username, secondsLeft: 60 });
+
+        room.disconnectTimers.set(userId, setTimeout(() => {
+            const r = getRoom(lobbyId);
+            if (!r || r.phase !== "playing") return;
+            const p = r.players.get(userId);
+            if (!p || p.surrendered) return;
+
+            emitToRoom(r, "diamant:playerKicked", { userId, username: p.username });
+
+            if (p.inCave && p.decision === null) {
+                p.decision = "leave";
+                if (playersInCave(r).every((pl) => pl.decision !== null)) resolveDecisions(r);
+            }
+        }, 60_000));
     });
 });
 
