@@ -177,21 +177,12 @@ io.on("connection", (socket) => {
         if (!player || player.surrendered) return;
 
         player.socketId = "";
-        emitToRoom(room, "diamant:inactivityWarning", { userId, username: player.username, secondsLeft: 60 });
 
-        room.disconnectTimers.set(userId, setTimeout(() => {
-            const r = getRoom(lobbyId);
-            if (!r || r.phase !== "playing") return;
-            const p = r.players.get(userId);
-            if (!p || p.surrendered) return;
-
-            emitToRoom(r, "diamant:playerKicked", { userId, username: p.username });
-
-            if (p.inCave && p.decision === null) {
-                p.decision = "leave";
-                if (playersInCave(r).every((pl) => pl.decision !== null)) resolveDecisions(r);
-            }
-        }, 60_000));
+        if (player.inCave && player.decision === null) {
+            player.decision = "leave";
+            emitToRoom(room, "diamant:playerDecided", { userId, state: buildPublicState(room) });
+            if (playersInCave(room).every((p) => p.decision !== null)) resolveDecisions(room);
+        }
     });
 });
 
