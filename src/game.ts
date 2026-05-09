@@ -12,13 +12,13 @@ export function startRound(room: Room) {
     room.deck = buildDeck();
     room.revealedCards = [];
     room.seenDangers = new Set();
-    room.rubisonCards = new Map();
+    room.diamantsOnCards = new Map();
     room.relicsInCave = [];
 
     room.players.forEach((p) => {
         if (p.surrendered) return;
         p.inCave = true;
-        p.handRubies = 0;
+        p.handDiamants = 0;
         p.decision = null;
     });
 
@@ -47,15 +47,15 @@ export function revealNextCard(room: Room) {
     if (card.type === "treasure") {
         const share = Math.floor(card.value! / inCave.length);
         const remainder = card.value! - share * inCave.length;
-        inCave.forEach((p) => { p.handRubies += share; });
-        room.rubisonCards.set(cardIndex, remainder);
+        inCave.forEach((p) => { p.handDiamants += share; });
+        room.diamantsOnCards.set(cardIndex, remainder);
         emitToRoom(room, "diamant:cardRevealed", { card, cardIndex, sharePerPlayer: share, remainder, state: buildPublicState(room) });
         startDecisionPhase(room);
 
     } else if (card.type === "danger") {
         const danger = card.danger!;
         if (room.seenDangers.has(danger)) {
-            inCave.forEach((p) => { p.handRubies = 0; p.inCave = false; });
+            inCave.forEach((p) => { p.handDiamants = 0; p.inCave = false; });
             const idx = room.deck.findIndex((c) => c.danger === danger);
             if (idx !== -1) room.deck.splice(idx, 1);
             emitToRoom(room, "diamant:cardRevealed", { card, cardIndex, state: buildPublicState(room) });
@@ -116,19 +116,19 @@ export function resolveDecisions(room: Room) {
         return;
     }
 
-    // Rubis sur cartes → partants à parts égales
-    const totalOnCards = Array.from(room.rubisonCards.values()).reduce((a, b) => a + b, 0);
+    // diamants sur cartes → partants à parts égales
+    const totalOnCards = Array.from(room.diamantsOnCards.values()).reduce((a, b) => a + b, 0);
     const shareFromCards = Math.floor(totalOnCards / leaving.length);
     const leftover = totalOnCards - shareFromCards * leaving.length;
-    leaving.forEach((p) => { p.handRubies += shareFromCards; });
+    leaving.forEach((p) => { p.handDiamants += shareFromCards; });
 
-    room.rubisonCards.clear();
+    room.diamantsOnCards.clear();
     if (leftover > 0 && room.revealedCards.length > 0) {
         const lastTreasureIdx = [...room.revealedCards]
             .map((c, i) => ({ c, i }))
             .filter(({ c }) => c.type === "treasure")
             .at(-1)?.i ?? room.revealedCards.length - 1;
-        room.rubisonCards.set(lastTreasureIdx, leftover);
+        room.diamantsOnCards.set(lastTreasureIdx, leftover);
     }
 
     // Reliques — seulement si UN SEUL joueur sort
@@ -146,8 +146,8 @@ export function resolveDecisions(room: Room) {
     }
 
     leaving.forEach((p) => {
-        p.safeRubies += p.handRubies;
-        p.handRubies = 0;
+        p.safeDiamants += p.handDiamants;
+        p.handDiamants = 0;
         p.inCave = false;
         p.decision = null;
     });
@@ -179,7 +179,7 @@ function buildDecisionsPayload(room: Room) {
 export async function endRound(room: Room, reason: "double_danger" | "all_left" | "deck_empty") {
     clearDecisionTimer(room);
     clearPhaseTimer(room);
-    playersInCave(room).forEach((p) => { p.handRubies = 0; p.inCave = false; });
+    playersInCave(room).forEach((p) => { p.handDiamants = 0; p.inCave = false; });
     room.relicsExited += room.relicsInCave.length;
     room.relicsInCave = [];
     emitToRoom(room, "diamant:roundEnd", { round: room.round, reason, state: buildPublicState(room) });
@@ -199,8 +199,8 @@ export async function endGame(room: Room) {
     const scores = Array.from(room.players.values())
         .map((p) => ({
             userId: p.userId, username: p.username,
-            score: p.safeRubies + p.relicPoints,
-            safeRubies: p.safeRubies, relicPoints: p.relicPoints, relicsOwned: p.relicsOwned,
+            score: p.safeDiamants + p.relicPoints,
+            safeDiamants: p.safeDiamants, relicPoints: p.relicPoints, relicsOwned: p.relicsOwned,
         }))
         .sort((a, b) => b.score - a.score);
 

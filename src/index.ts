@@ -26,52 +26,59 @@ setupSocketAuth(io, new TextEncoder().encode(process.env.INTERNAL_API_KEY!));
 const lobbySocket = connectToLobby('diamant-server', 'diamant');
 
 lobbySocket.on("diamant:configure", ({ lobbyId, players, options }: any, ack?: () => void) => {
-        if (!lobbyId || !players?.length) return;
+    if (!lobbyId || !players?.length) return;
 
-        let botIdx = 0;
-        const room: Room = {
-            lobbyId,
-            options: { roundCount: options?.roundCount ?? 5, decisionDuration: options?.decisionDuration ?? 30 },
-            players: new Map(
-                players.map((p: { userId: string; username: string }) => {
-                    const isBot = p.userId.startsWith("bot-");
-                    return [p.userId, {
-                        userId: p.userId, username: p.username, socketId: "",
-                        handRubies: 0, safeRubies: 0, relicPoints: 0, relicsOwned: 0,
-                        riskTolerance: isBot ? BOT_TOLERANCES[botIdx++ % BOT_TOLERANCES.length] : undefined,
-                        inCave: false, decision: null, surrendered: false,
-                    }];
-                }),
-            ),
-            phase: "waiting", round: 1, currentGameId: randomUUID(),
-            revealedCards: [], deck: [], seenDangers: new Set(),
-            rubisonCards: new Map(), relicsInCave: [], relicsExited: 0,
-            decisionTimer: null, decisionEndsAt: null, phaseTimer: null, finalScores: [],
-            disconnectTimers: new Map(),
-        };
+    let botIdx = 0;
+    const room: Room = {
+        lobbyId,
+        options: { roundCount: options?.roundCount ?? 5, decisionDuration: options?.decisionDuration ?? 30 },
+        players: new Map(
+            players.map((p: { userId: string; username: string; }) => {
+                const isBot = p.userId.startsWith("bot-");
+                return [p.userId, {
+                    userId: p.userId, username: p.username, socketId: "",
+                    handDiamants: 0, safeDiamants: 0, relicPoints: 0, relicsOwned: 0,
+                    riskTolerance: isBot ? BOT_TOLERANCES[botIdx++ % BOT_TOLERANCES.length] : undefined,
+                    inCave: false, decision: null, surrendered: false,
+                }];
+            })
+        ),
+        phase: "waiting", round: 1, currentGameId: randomUUID(),
+        revealedCards: [],
+        deck: [],
+        seenDangers: new Set(),
+        diamantsOnCards: new Map(),
+        relicsInCave: [],
+        relicsExited: 0,
+        decisionTimer: null,
+        decisionEndsAt: null,
+        phaseTimer: null,
+        finalScores: [],
+        disconnectTimers: new Map(),
+    };
 
-        setRoom(lobbyId, room);
-        console.log(`[DIAMANT] Room configured: ${lobbyId} (${players.length} players)`);
+    setRoom(lobbyId, room);
+    console.log(`[DIAMANT] Room configured: ${lobbyId} (${players.length} players)`);
 
-        // Race condition: joueurs connectés avant configure
-        for (const [, sock] of io.of("/").sockets as Map<string, import("socket.io").Socket>) {
-            if (!sock.rooms.has(`room:${lobbyId}`)) continue;
-            const uid = sock.data?.userId;
-            if (!uid) continue;
-            const p = room.players.get(uid);
-            if (!p || p.socketId !== "") continue;
-            p.socketId = sock.id;
-            sock.emit("diamant:joined", { phase: room.phase, state: buildPublicState(room) });
-        }
+    // Race condition: joueurs connectés avant configure
+    for (const [, sock] of io.of("/").sockets as Map<string, import("socket.io").Socket>) {
+        if (!sock.rooms.has(`room:${lobbyId}`)) continue;
+        const uid = sock.data?.userId;
+        if (!uid) continue;
+        const p = room.players.get(uid);
+        if (!p || p.socketId !== "") continue;
+        p.socketId = sock.id;
+        sock.emit("diamant:joined", { phase: room.phase, state: buildPublicState(room) });
+    }
 
-        const allConnected = Array.from(room.players.values()).every(
-            (p) => p.socketId !== "" || p.userId.startsWith("bot-"),
-        );
-        if (allConnected && room.phase === "waiting") {
-            room.phase = "playing";
-            setTimeout(() => startRound(room), 500);
-        }
-        if (typeof ack === "function") ack();
+    const allConnected = Array.from(room.players.values()).every(
+        (p) => p.socketId !== "" || p.userId.startsWith("bot-"),
+    );
+    if (allConnected && room.phase === "waiting") {
+        room.phase = "playing";
+        setTimeout(() => startRound(room), 500);
+    }
+    if (typeof ack === "function") ack();
 });
 
 // ── Socket handlers ────────────────────────────────────────────────────────────

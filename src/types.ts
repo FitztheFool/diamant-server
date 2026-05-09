@@ -11,8 +11,8 @@ export interface Player {
     userId: string;
     username: string;
     socketId: string;
-    handRubies: number;
-    safeRubies: number;
+    handDiamants: number;
+    safeDiamants: number;
     relicPoints: number;
     relicsOwned: number;
     inCave: boolean;
@@ -22,6 +22,7 @@ export interface Player {
 }
 
 export interface Room {
+    diamantsOnCards: Map<any, any>;
     lobbyId: string;
     options: { roundCount: number; decisionDuration: number };
     players: Map<string, Player>;
@@ -30,7 +31,6 @@ export interface Room {
     revealedCards: Card[];
     deck: Card[];
     seenDangers: Set<string>;
-    rubisonCards: Map<number, number>;
     relicsInCave: string[];
     relicsExited: number;
     decisionTimer: ReturnType<typeof setTimeout> | null;

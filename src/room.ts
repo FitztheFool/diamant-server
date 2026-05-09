@@ -27,14 +27,14 @@ export function buildPublicState(room: Room) {
         round: room.round,
         phase: room.phase,
         revealedCards: room.revealedCards,
-        rubisonCards: Object.fromEntries(room.rubisonCards),
+        diamantOnCards: Object.fromEntries(room.diamantsOnCards),
         relicsInCave: room.relicsInCave,
         relicsExited: room.relicsExited,
         players: Array.from(room.players.values()).map((p) => ({
             userId: p.userId,
             username: p.username,
-            handRubies: p.handRubies,
-            safeRubies: p.safeRubies,
+            handDiamants: p.handDiamants,
+            safeDiamants: p.safeDiamants,
             relicPoints: p.relicPoints,
             relicsOwned: p.relicsOwned,
             inCave: p.inCave,
@@ -89,8 +89,8 @@ export function botDecide(room: Room, bot: Player): "continue" | "leave" {
     if (pDoubleDanger > tolerance) return "leave";
 
     const rubyThreshold = Math.round(3 + tolerance * 14);
-    if (bot.handRubies >= rubyThreshold && pDoubleDanger > tolerance * 0.4) return "leave";
-    if (bot.handRubies >= Math.max(3, Math.round(rubyThreshold * 0.55)) && pDoubleDanger > tolerance * 0.65) return "leave";
+    if (bot.handDiamants >= rubyThreshold && pDoubleDanger > tolerance * 0.4) return "leave";
+    if (bot.handDiamants >= Math.max(3, Math.round(rubyThreshold * 0.55)) && pDoubleDanger > tolerance * 0.65) return "leave";
     if (room.revealedCards.length >= 8 && pDoubleDanger > tolerance * 0.35) return "leave";
 
     return "continue";
