@@ -21,7 +21,7 @@ const io = new Server(server, { cors: corsConfig, maxHttpBufferSize: 1e5 });
 
 setIo(io);
 
-setupSocketAuth(io, new TextEncoder().encode(process.env.INTERNAL_API_KEY!));
+setupSocketAuth(io, new TextEncoder().encode((process.env.SOCKET_USER_SECRET ?? process.env.INTERNAL_API_KEY)!));
 
 const lobbySocket = connectToLobby('diamant-server', 'diamant');
 
@@ -198,6 +198,12 @@ io.on("connection", (socket) => {
 const PORT = process.env.PORT || 10009;
 server.listen(PORT, () => console.log("[DIAMANT] realtime listening on", PORT));
 
-const shutdown = () => server.close(() => process.exit(0));
+const shutdown = () => {
+    io.close(() => {
+        server.close(() => process.exit(0));
+    });
+    setTimeout(() => process.exit(1), 3000).unref();
+};
+
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
