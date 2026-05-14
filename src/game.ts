@@ -214,9 +214,18 @@ export async function endGame(room: Room) {
         const vsBot = Array.from(room.players.keys()).some((id) => id.startsWith("bot-"));
         const humanScores = scores.filter((s) => !s.userId.startsWith("bot-"));
         if (humanScores.length > 0) {
-            const bots = scores
-                .filter((s) => s.userId.startsWith("bot-"))
-                .map((s, i) => ({ username: s.username, score: s.score, placement: i + 1 }));
+            const isAbandon = (userId: string) =>
+                room.surrenderUserId === userId || (room.players.get(userId)?.surrendered ?? false);
+
+            const humanFinishers = humanScores.filter((s) => !isAbandon(s.userId));
+            const botScoresAll = scores.filter((s) => s.userId.startsWith("bot-"));
+            const allFinishers = [...humanFinishers, ...botScoresAll].sort((a, b) => b.score - a.score);
+
+            const bots = botScoresAll.map((s) => ({
+                username: s.username,
+                score: s.score,
+                placement: allFinishers.findIndex((x) => x.userId === s.userId) + 1,
+            }));
             try {
                 const res = await fetch(`${frontendUrl}/api/attempts`, {
                     method: "POST",
@@ -226,10 +235,16 @@ export async function endGame(room: Room) {
                         gameId: room.currentGameId ?? room.lobbyId,
                         vsBot,
                         bots: bots.length > 0 ? bots : undefined,
-                        scores: scores.map((s, i) => ({
-                            userId: s.userId, username: s.username, score: s.score, placement: i + 1,
-                            abandon: room.surrenderUserId === s.userId || (room.players.get(s.userId)?.surrendered ?? false),
-                        })),
+                        scores: scores.map((s) => {
+                            const abandon = isAbandon(s.userId);
+                            return {
+                                userId: s.userId,
+                                username: s.username,
+                                score: s.score,
+                                placement: abandon ? null : humanFinishers.findIndex((x) => x.userId === s.userId) + 1,
+                                abandon,
+                            };
+                        }),
                     }),
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
