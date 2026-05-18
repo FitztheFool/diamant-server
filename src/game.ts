@@ -241,7 +241,7 @@ export async function endGame(room: Room) {
                                 userId: s.userId,
                                 username: s.username,
                                 score: s.score,
-                                placement: abandon ? null : humanFinishers.findIndex((x) => x.userId === s.userId) + 1,
+                                placement: abandon ? null : allFinishers.findIndex((x) => x.userId === s.userId) + 1,
                                 abandon,
                             };
                         }),
