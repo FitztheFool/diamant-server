@@ -1,3 +1,5 @@
+import type { GameLogEntry } from "./gameLog";
+
 export type CardType = "treasure" | "danger" | "relic";
 
 export interface Card {
@@ -40,4 +42,6 @@ export interface Room {
     surrenderUserId?: string;
     currentGameId?: string;
     disconnectTimers: Map<string, ReturnType<typeof setTimeout>>;
+    log: GameLogEntry[];
+    logSeq?: number;
 }

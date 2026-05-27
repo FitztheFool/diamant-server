@@ -5,6 +5,12 @@ import {
     botDecide, buildDeck, buildPublicState, clearDecisionTimer, clearPhaseTimer,
     deleteRoom, emitToRoom, playersInCave,
 } from "./room";
+import { pushLog } from "./gameLog";
+
+const DANGER_FR: Record<string, string> = {
+    spider: "Araignées", fireball: "Boule de feu", mummy: "Momie",
+    landslide: "Éboulement", snake: "Serpents",
+};
 
 // ── Round ──────────────────────────────────────────────────────────────────────
 
@@ -22,6 +28,7 @@ export function startRound(room: Room) {
         p.decision = null;
     });
 
+    pushLog(room, "system", `Manche ${room.round}/${room.options.roundCount} — exploration de la grotte`);
     emitToRoom(room, "diamant:roundStart", {
         round: room.round,
         totalRounds: room.options.roundCount,
@@ -49,6 +56,7 @@ export function revealNextCard(room: Room) {
         const remainder = card.value! - share * inCave.length;
         inCave.forEach((p) => { p.handDiamants += share; });
         room.diamantsOnCards.set(cardIndex, remainder);
+        pushLog(room, "score", `Trésor de ${card.value} 💎 — ${share} par explorateur`);
         emitToRoom(room, "diamant:cardRevealed", { card, cardIndex, sharePerPlayer: share, remainder, state: buildPublicState(room) });
         startDecisionPhase(room);
 
@@ -58,12 +66,14 @@ export function revealNextCard(room: Room) {
             inCave.forEach((p) => { p.handDiamants = 0; p.inCave = false; });
             const idx = room.deck.findIndex((c) => c.danger === danger);
             if (idx !== -1) room.deck.splice(idx, 1);
+            pushLog(room, "coup", `Double danger ${DANGER_FR[danger] ?? danger} ! Les explorateurs encore dedans perdent tout`);
             emitToRoom(room, "diamant:cardRevealed", { card, cardIndex, state: buildPublicState(room) });
             emitToRoom(room, "diamant:doubleDanger", { danger, state: buildPublicState(room) });
             clearPhaseTimer(room);
             room.phaseTimer = setTimeout(() => endRound(room, "double_danger"), 2000);
         } else {
             room.seenDangers.add(danger);
+            pushLog(room, "attack", `Danger : ${DANGER_FR[danger] ?? danger}`);
             emitToRoom(room, "diamant:cardRevealed", { card, cardIndex, state: buildPublicState(room) });
             startDecisionPhase(room);
         }
@@ -71,6 +81,7 @@ export function revealNextCard(room: Room) {
     } else {
         // relic
         room.relicsInCave.push(card.id);
+        pushLog(room, "safety", `Une relique apparaît !`);
         emitToRoom(room, "diamant:cardRevealed", { card, cardIndex, state: buildPublicState(room) });
         startDecisionPhase(room);
     }
@@ -107,7 +118,11 @@ export function startDecisionPhase(room: Room) {
 
 export function resolveDecisions(room: Room) {
     clearDecisionTimer(room);
-    const leaving = playersInCave(room).filter((p) => p.decision === "leave");
+    const deciding = playersInCave(room);
+    const leaving = deciding.filter((p) => p.decision === "leave");
+    const continuing = deciding.filter((p) => p.decision === "continue");
+
+    for (const p of continuing) pushLog(room, "move", `${p.username} continue d'explorer`);
 
     if (leaving.length === 0) {
         emitToRoom(room, "diamant:decisionsRevealed", { decisions: buildDecisionsPayload(room), state: buildPublicState(room) });
@@ -145,7 +160,11 @@ export function resolveDecisions(room: Room) {
         room.relicsInCave = [];
     }
 
+    if (relicsCollected > 0 && leaving.length === 1) {
+        pushLog(room, "safety", `${leaving[0].username} récupère ${relicsCollected} relique${relicsCollected > 1 ? 's' : ''}`);
+    }
     leaving.forEach((p) => {
+        pushLog(room, "defend", `${p.username} rentre au camp avec ${p.handDiamants} 💎`);
         p.safeDiamants += p.handDiamants;
         p.handDiamants = 0;
         p.inCave = false;
@@ -182,6 +201,10 @@ export async function endRound(room: Room, reason: "double_danger" | "all_left" 
     playersInCave(room).forEach((p) => { p.handDiamants = 0; p.inCave = false; });
     room.relicsExited += room.relicsInCave.length;
     room.relicsInCave = [];
+    const REASON_FR: Record<string, string> = {
+        double_danger: "double danger", all_left: "tous sortis", deck_empty: "grotte épuisée",
+    };
+    pushLog(room, "system", `Fin de la manche ${room.round} (${REASON_FR[reason] ?? reason})`);
     emitToRoom(room, "diamant:roundEnd", { round: room.round, reason, state: buildPublicState(room) });
 
     if (room.round >= room.options.roundCount) {
@@ -205,6 +228,7 @@ export async function endGame(room: Room) {
         .sort((a, b) => b.score - a.score);
 
     room.finalScores = scores;
+    if (scores[0]) pushLog(room, "coup", `${scores[0].username} gagne avec ${scores[0].score} points !`);
     emitToRoom(room, "diamant:finished", { scores, winnerId: scores[0]?.userId ?? null });
 
     // Save to DB

@@ -41,6 +41,7 @@ export function buildPublicState(room: Room) {
             surrendered: p.surrendered,
             hasDecided: p.decision !== null,
         })),
+        log: (room.log ?? []).slice(-100),
     };
 }
 

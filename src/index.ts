@@ -8,6 +8,7 @@ import { Server } from "socket.io";
 import { setupSocketAuth, corsConfig, connectToLobby } from "@kwizar/shared";
 import { BOT_TOLERANCES, buildPublicState, emitToRoom, getRoom, playersInCave, setIo, setRoom, clearPhaseTimer } from "./room";
 import { endGame, endRound, resolveDecisions, startDecisionPhase, startRound } from "./game";
+import { pushLog } from "./gameLog";
 import type { Room } from "./types";
 
 // ── Server setup ───────────────────────────────────────────────────────────────
@@ -55,6 +56,8 @@ lobbySocket.on("diamant:configure", ({ lobbyId, players, options }: any, ack?: (
         phaseTimer: null,
         finalScores: [],
         disconnectTimers: new Map(),
+        log: [],
+        logSeq: 0,
     };
 
     setRoom(lobbyId, room);
@@ -153,6 +156,7 @@ io.on("connection", (socket) => {
         const active = Array.from(room.players.values()).filter((p) => !p.surrendered);
         player.surrendered = true;
         player.inCave = false;
+        pushLog(room, "system", `${player.username} abandonne la partie`);
         emitToRoom(room, "diamant:playerSurrendered", { userId });
 
         const remainingActive = active.filter((p) => p.userId !== userId);
