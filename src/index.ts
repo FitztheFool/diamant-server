@@ -87,7 +87,7 @@ lobbySocket.on("diamant:configure", ({ lobbyId, players, options }: any, ack?: (
 // ── Socket handlers ────────────────────────────────────────────────────────────
 
 io.on("connection", (socket) => {
-    console.log("diamant: new connection", socket.id);
+    console.log("[DIAMANT] connexion", socket.id);
 
     // ── Join ──────────────────────────────────────────────────────────────────
     socket.on("diamant:join", ({ lobbyId }) => {
@@ -200,7 +200,7 @@ io.on("connection", (socket) => {
 // ── Start ──────────────────────────────────────────────────────────────────────
 
 const PORT = process.env.PORT || 10009;
-server.listen(PORT, () => console.log("[DIAMANT] realtime listening on", PORT));
+server.listen(PORT, () => console.log("[DIAMANT] listening on port", PORT));
 
 const shutdown = () => {
     io.close(() => {
