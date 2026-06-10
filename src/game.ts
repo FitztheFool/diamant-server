@@ -273,6 +273,8 @@ export async function endGame(room: Room) {
                 });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 console.log(`[DIAMANT] scores saved for ${room.currentGameId ?? room.lobbyId}`);
+                const data = (await res.json().catch(() => null)) as { elo?: { userId: string; before: number; after: number; delta: number }[] } | null;
+                if (data?.elo?.length) emitToRoom(room, "elo:update", { gameType: "DIAMANT", elo: data.elo });
             } catch (err) {
                 console.error("[DIAMANT] saveAttempts error:", err);
             }
