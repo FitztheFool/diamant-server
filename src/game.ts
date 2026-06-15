@@ -99,10 +99,12 @@ export function startDecisionPhase(room: Room) {
     emitToRoom(room, "diamant:decisionPhase", { endsAt, duration: room.options.decisionDuration, state: buildPublicState(room) });
 
     clearDecisionTimer(room);
-    room.decisionTimer = setTimeout(() => {
-        playersInCave(room).forEach((p) => { if (p.decision === null) p.decision = "leave"; });
-        resolveDecisions(room);
-    }, room.options.decisionDuration * 1000);
+    if (room.options.decisionDuration > 0) {          // 0 = pas de limite (jamais AFK)
+        room.decisionTimer = setTimeout(() => {
+            playersInCave(room).forEach((p) => { if (p.decision === null) p.decision = "leave"; });
+            resolveDecisions(room);
+        }, room.options.decisionDuration * 1000);
+    }
 
     // Bots
     const bots = playersInCave(room).filter((p) => p.userId.startsWith("bot-"));

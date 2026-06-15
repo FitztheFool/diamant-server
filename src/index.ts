@@ -26,13 +26,13 @@ setupSocketAuth(io, new TextEncoder().encode((process.env.SOCKET_USER_SECRET ?? 
 
 const lobbySocket = connectToLobby('diamant-server', 'diamant');
 
-lobbySocket.on("diamant:configure", ({ lobbyId, players, options }: any, ack?: () => void) => {
+lobbySocket.on("diamant:configure", ({ lobbyId, players, options, turnSeconds }: any, ack?: () => void) => {
     if (!lobbyId || !players?.length) return;
 
     let botIdx = 0;
     const room: Room = {
         lobbyId,
-        options: { roundCount: options?.roundCount ?? 5, decisionDuration: options?.decisionDuration ?? 30 },
+        options: { roundCount: options?.roundCount ?? 5, decisionDuration: turnSeconds ?? options?.decisionDuration ?? 30 },
         players: new Map(
             players.map((p: { userId: string; username: string; }) => {
                 const isBot = p.userId.startsWith("bot-");
