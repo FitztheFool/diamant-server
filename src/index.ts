@@ -101,7 +101,12 @@ io.on("connection", (socket) => {
         if (!room) { socket.emit("notFound"); return; }
 
         const player = room.players.get(userId);
-        if (!player) { socket.emit("diamant:error", { message: "Player not in this game" }); return; }
+        if (!player) {
+            // Non-joueur : rejoint en spectateur (état public, déjà dans la room → reçoit les broadcasts).
+            socket.emit("diamant:joined", { phase: room.phase, state: buildPublicState(room), spectator: true,
+                ...(room.decisionEndsAt && room.phase === "playing" ? { decisionEndsAt: room.decisionEndsAt } : {}) });
+            return;
+        }
 
         player.socketId = socket.id;
 
