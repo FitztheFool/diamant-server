@@ -2,29 +2,22 @@
 
 import "dotenv/config";
 import { randomUUID } from "crypto";
-import express from "express";
-import http from "http";
 import { Server } from "socket.io";
-import { setupSocketAuth, corsConfig, connectToLobby } from "@kwizar/shared";
+import { createGameServer } from '@kwizar/shared';
 import { BOT_TOLERANCES, buildPublicState, emitToRoom, getRoom, playersInCave, setIo, setRoom, clearPhaseTimer } from "./room";
 import { endGame, endRound, resolveDecisions, startDecisionPhase, startRound } from "./game";
-import { pushLog } from "./gameLog";
+import { pushLog } from '@kwizar/shared';
 import type { Room } from "./types";
 
 // ── Server setup ───────────────────────────────────────────────────────────────
 
-const app = express();
-app.get("/health", (_req, res) => { res.set("Access-Control-Allow-Origin", "*"); res.status(200).send("ok"); });
 
-const server = http.createServer(app);
 
-const io = new Server(server, { cors: corsConfig, maxHttpBufferSize: 1e5 });
+const { io, lobbySocket, listen } = createGameServer({ serviceName: 'diamant-server', gameType: 'diamant', defaultPort: 10009 });
 
 setIo(io);
 
-setupSocketAuth(io, new TextEncoder().encode((process.env.SOCKET_USER_SECRET ?? process.env.INTERNAL_API_KEY)!));
 
-const lobbySocket = connectToLobby('diamant-server', 'diamant');
 
 lobbySocket.on("diamant:configure", ({ lobbyId, players, options, turnSeconds }: any, ack?: () => void) => {
     if (!lobbyId || !players?.length) return;
@@ -204,15 +197,5 @@ io.on("connection", (socket) => {
 
 // ── Start ──────────────────────────────────────────────────────────────────────
 
-const PORT = process.env.PORT || 10009;
-server.listen(PORT, () => console.log("[DIAMANT] listening on port", PORT));
+listen();
 
-const shutdown = () => {
-    io.close(() => {
-        server.close(() => process.exit(0));
-    });
-    setTimeout(() => process.exit(1), 3000).unref();
-};
-
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);

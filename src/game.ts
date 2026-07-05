@@ -5,7 +5,7 @@ import {
     botDecide, buildDeck, buildPublicState, clearDecisionTimer, clearPhaseTimer,
     deleteRoom, emitToRoom, playersInCave,
 } from "./room";
-import { pushLog } from "./gameLog";
+import { pushLog } from '@kwizar/shared';
 
 const DANGER_FR: Record<string, string> = {
     spider: "Araignées", fireball: "Boule de feu", mummy: "Momie",
