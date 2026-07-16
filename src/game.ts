@@ -166,7 +166,11 @@ export function resolveDecisions(room: Room) {
         pushLog(room, "safety", `${leaving[0].username} récupère ${relicsCollected} relique${relicsCollected > 1 ? 's' : ''}`);
     }
     leaving.forEach((p) => {
-        pushLog(room, "defend", `${p.username} rentre au camp avec ${p.handDiamants} 💎`);
+        // relicsCollected n'est > 0 que si un seul joueur sort → c'est forcément p.
+        // On mentionne les reliques emportées, sinon « rentre avec 0 💎 » alors qu'il
+        // a ramassé des reliques donne l'impression de repartir bredouille.
+        const relicSuffix = relicsCollected > 0 ? ` et ${relicsCollected} 🏺` : "";
+        pushLog(room, "defend", `${p.username} rentre au camp avec ${p.handDiamants} 💎${relicSuffix}`);
         p.safeDiamants += p.handDiamants;
         p.handDiamants = 0;
         p.inCave = false;
